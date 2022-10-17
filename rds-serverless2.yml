@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Aurora Serverless v2 (Aurora3) 
+Parameters:
+  VpcId:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-04f09656c66e026c6
+  DatabaseName:
+    Description: DatabaseName
+    Type: String
+    Default: testdb
+  # MaxConnectionsPercent:
+  #   Description: "MaxConnectionsPercent For RDS Proxy"
+  #   Type: Number
+  #   Default: 60
+  # MaxIdleConnectionsPercent:
+  #   Description: "MaxIdleConnectionsPercent For RDS Proxy"
+  #   Type: Number
+  #   Default: 50
+  # ConnectionBorrowTimeout:
+  #   Description: "ConnectionBorrowTimeout For RDS Proxy"
+  #   Type: Number
+  #   Default: 120
+
+Resources:
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: RDSSecret
+      Description: "This is automatic generated Secrets Manager secret for an RDS DB instance"
+      GenerateSecretString:
+        # ユーザー名 "developersio"がハードコードされている
+        SecretStringTemplate: '{"username": "admin"}'
+        # パスワード "キーが生成され、マージされます。
+        GenerateStringKey: "password"
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\$`&:{}()[]+*=^-|'
+  
+  SecretManagerVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn:
+      - RDSSecret
+    Properties:
+      VpcId: !Ref VpcId
+      SubnetIds:
+        - subnet-05f4613dcf628effe
+        - subnet-0817dcd15faefaf0f
+      PrivateDnsEnabled: true
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      SecurityGroupIds:
+        - sg-0c8e458d858684073
+        - sg-01c4df154a8a5bfbe
+        - sg-02c9ba8a2d63ad6d6
+      VpcEndpointType: Interface
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Principal: "*"
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource:
+              - !Ref RDSSecret
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub '${AWS::StackName}-DBSubnetGroup'
+      SubnetIds: 
+        - subnet-05f4613dcf628effe
+        - subnet-0817dcd15faefaf0f
+
+  DBClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: !Sub '${AWS::StackName}-DBClusterParameterGroup'
+      Family: aurora-mysql8.0
+      Parameters:
+        character_set_server: utf8
+        character_set_client: utf8
+        character_set_connection: utf8
+        character_set_results: utf8
+        character_set_database: utf8
+        performance_schema: 1
+
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: !Sub '${AWS::StackName}-DBParameterGroup'
+      Family: aurora-mysql8.0
+      Parameters:
+        general_log: 0
+        slow_query_log: 1
+        long_query_time: 5000
+        log_output: FILE
+
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    Properties:
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: aurora-mysql
+      EngineVersion: 8.0.mysql_aurora.3.02.0
+      VpcSecurityGroupIds:
+        - sg-01c4df154a8a5bfbe
+      DBClusterParameterGroupName: !Ref 'DBClusterParameterGroup'
+      # PreferredMaintenanceWindow: Thu:18:35-Thu:19:05
+      # PreferredBackupWindow: 18:05-18:35
+      BackupRetentionPeriod: 7
+      DatabaseName: !Ref 'DatabaseName'
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}' ]]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}' ]]
+      ServerlessV2ScalingConfiguration: 
+        MaxCapacity: 16
+        MinCapacity: 0.5
+
+  DBInstance1:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref DBCluster
+      DBInstanceIdentifier: instance1
+      DBInstanceClass: db.serverless
+      DBParameterGroupName: !Ref DBParameterGroup
+      Engine: aurora-mysql
+      EnablePerformanceInsights: false
+      # PreferredMaintenanceWindow: Thu:19:05-Thu:19:35
+      PromotionTier: 0
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+
+  SecretRDSInstanceAttachment:
+    Type: "AWS::SecretsManager::SecretTargetAttachment"
+    DependsOn:
+      - DBCluster
+      - DBInstance1
+      - RDSSecret
+      - SecretManagerVpcEndpoint
+    Properties:
+      SecretId: !Ref RDSSecret
+      TargetId: !Ref DBCluster
+      TargetType: AWS::RDS::DBCluster
+
+  # DBInstance2:
+  #   Type: AWS::RDS::DBInstance
+  #   Properties:
+  #     DBClusterIdentifier: !Ref 'DBCluster'
+  #     DBInstanceClass: db.serverless
+  #     DBParameterGroupName: !Ref 'DBParameterGroup'
+  #     Engine: aurora-mysql
+  #     EnablePerformanceInsights: true
+  #     PreferredMaintenanceWindow: Thu:19:05-Thu:19:35
+  #     PromotionTier: 1
+  #     AvailabilityZone: !Select
+  #       - 1
+  #       - !GetAZs
+  #         Ref: AWS::Region
+
+  ProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action: [ 'sts:AssumeRole' ]
+            Effect: Allow
+            Principal:
+              Service: [ rds.amazonaws.com ]
+      Policies:
+        - PolicyName: DBProxyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Ref RDSSecret
+
+  RDSProxy:
+    Type: AWS::RDS::DBProxy
+    DependsOn:
+      - ProxyRole
+      - RDSSecret
+      - SecretManagerVpcEndpoint
+      - DBCluster
+      - DBInstance1
+    Properties:
+      Auth:
+      # Secrets Managerを利用してユーザ名とパスワードで認証
+      # 予めSecretsは作成しておく必要があり
+        - AuthScheme: SECRETS
+          IAMAuth: DISABLED
+          SecretArn: !Ref RDSSecret
+      # 作成するRDS Proxyの名前
+      DBProxyName: !Sub '${AWS::StackName}-DBProxy'
+      # 2020/08/17時点でMySQLとPostgreSQLがサポートされている
+      EngineFamily: MYSQL
+      # Proxyとクライアント間の接続がアイドル状態の時に接続切断するまでの秒数
+      IdleClientTimeout: 900
+      # TLSが必須かどうか
+      # RequireTLS: false
+      # RDS Proxyに設定するIAM Role
+      # 今回はSecrets Managerから値を取得して復号可能なRoleをアタッチ
+      RoleArn: !GetAtt ProxyRole.Arn
+      # RDS Proxyにアタッチするセキュリティグループ
+      VpcSecurityGroupIds: 
+        - sg-0c8e458d858684073
+      # RDS Proxyを構築するVPC Subnet
+      VpcSubnetIds: 
+        - subnet-05f4613dcf628effe
+        - subnet-0817dcd15faefaf0f

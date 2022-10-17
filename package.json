@@ -1,0 +1,30 @@
+{
+  "name": "mysql-lambda",
+  "version": "0.1.0",
+  "bin": {
+    "mysql-lambda": "bin/mysql-lambda.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "clear": "rimraf {lib,bin,test,src/function}/**/{*.js,*.d.ts} src/layer/nodejs/service/{src/*,index}.{js,d.ts}",
+    "deploy": "npm run build && cdk deploy && npm run clear"
+  },
+  "devDependencies": {
+    "@types/jest": "^27.5.2",
+    "@types/node": "10.17.27",
+    "@types/prettier": "2.6.0",
+    "aws-cdk": "2.46.0",
+    "jest": "^27.5.1",
+    "ts-jest": "^27.1.4",
+    "ts-node": "^10.9.1",
+    "typescript": "~4.5.5"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.46.0",
+    "constructs": "^10.0.0",
+    "rimraf": "^3.0.2",
+    "source-map-support": "^0.5.21"
+  }
+}

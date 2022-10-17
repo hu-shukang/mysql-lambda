@@ -1,0 +1,16 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS <-> Proxy Attach
+
+Resources:
+  ProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: testrds-dbproxy
+      # Proxyが接続するRDS Auroraクラスターの識別子
+      DBClusterIdentifiers: 
+        - testrds-dbcluster-haas3yfgxgcy
+      TargetGroupName: default
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 60
+        MaxIdleConnectionsPercent: 50
+        ConnectionBorrowTimeout: 120

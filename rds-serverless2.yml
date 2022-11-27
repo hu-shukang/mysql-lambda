@@ -4,23 +4,11 @@ Parameters:
   VpcId:
     Description: VPC ID
     Type: AWS::EC2::VPC::Id
-    Default: vpc-04f09656c66e026c6
+    Default: vpc-0f4a6f26703335b0f
   DatabaseName:
     Description: DatabaseName
     Type: String
     Default: testdb
-  # MaxConnectionsPercent:
-  #   Description: "MaxConnectionsPercent For RDS Proxy"
-  #   Type: Number
-  #   Default: 60
-  # MaxIdleConnectionsPercent:
-  #   Description: "MaxIdleConnectionsPercent For RDS Proxy"
-  #   Type: Number
-  #   Default: 50
-  # ConnectionBorrowTimeout:
-  #   Description: "ConnectionBorrowTimeout For RDS Proxy"
-  #   Type: Number
-  #   Default: 120
 
 Resources:
   RDSSecret:
@@ -38,19 +26,17 @@ Resources:
   
   SecretManagerVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
-    DependsOn:
-      - RDSSecret
     Properties:
       VpcId: !Ref VpcId
       SubnetIds:
-        - subnet-05f4613dcf628effe
-        - subnet-0817dcd15faefaf0f
+        - subnet-06e33ef6ca880faaa
+        - subnet-0dd6588efa94d2d2e
       PrivateDnsEnabled: true
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
       SecurityGroupIds:
-        - sg-0c8e458d858684073
-        - sg-01c4df154a8a5bfbe
-        - sg-02c9ba8a2d63ad6d6
+        - sg-0be055c73d376d845
+        - sg-097fef894bf28f5b3
+        - sg-0db8b85557f84461f
       VpcEndpointType: Interface
       PolicyDocument:
         Version: 2012-10-17
@@ -67,8 +53,8 @@ Resources:
     Properties:
       DBSubnetGroupDescription: !Sub '${AWS::StackName}-DBSubnetGroup'
       SubnetIds: 
-        - subnet-05f4613dcf628effe
-        - subnet-0817dcd15faefaf0f
+        - subnet-06e33ef6ca880faaa
+        - subnet-0dd6588efa94d2d2e
 
   DBClusterParameterGroup:
     Type: AWS::RDS::DBClusterParameterGroup
@@ -102,8 +88,8 @@ Resources:
       Engine: aurora-mysql
       EngineVersion: 8.0.mysql_aurora.3.02.0
       VpcSecurityGroupIds:
-        - sg-01c4df154a8a5bfbe
-      DBClusterParameterGroupName: !Ref 'DBClusterParameterGroup'
+        - sg-0be055c73d376d845
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
       # PreferredMaintenanceWindow: Thu:18:35-Thu:19:05
       # PreferredBackupWindow: 18:05-18:35
       BackupRetentionPeriod: 7
@@ -131,12 +117,7 @@ Resources:
           Ref: AWS::Region
 
   SecretRDSInstanceAttachment:
-    Type: "AWS::SecretsManager::SecretTargetAttachment"
-    DependsOn:
-      - DBCluster
-      - DBInstance1
-      - RDSSecret
-      - SecretManagerVpcEndpoint
+    Type: AWS::SecretsManager::SecretTargetAttachment
     Properties:
       SecretId: !Ref RDSSecret
       TargetId: !Ref DBCluster
@@ -175,18 +156,13 @@ Resources:
             Statement:
               - Action:
                   - secretsmanager:GetSecretValue
+                  # - secretsmanager:DescribeSecret
                 Effect: Allow
                 Resource:
                   - !Ref RDSSecret
 
   RDSProxy:
     Type: AWS::RDS::DBProxy
-    DependsOn:
-      - ProxyRole
-      - RDSSecret
-      - SecretManagerVpcEndpoint
-      - DBCluster
-      - DBInstance1
     Properties:
       Auth:
       # Secrets Managerを利用してユーザ名とパスワードで認証
@@ -207,8 +183,21 @@ Resources:
       RoleArn: !GetAtt ProxyRole.Arn
       # RDS Proxyにアタッチするセキュリティグループ
       VpcSecurityGroupIds: 
-        - sg-0c8e458d858684073
+        - sg-0db8b85557f84461f
       # RDS Proxyを構築するVPC Subnet
       VpcSubnetIds: 
-        - subnet-05f4613dcf628effe
-        - subnet-0817dcd15faefaf0f
+        - subnet-06e33ef6ca880faaa
+        - subnet-0dd6588efa94d2d2e
+
+  ProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref RDSProxy
+      # Proxyが接続するRDS Auroraクラスターの識別子
+      DBClusterIdentifiers: 
+        - !Ref DBCluster
+      TargetGroupName: default
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 60
+        MaxIdleConnectionsPercent: 50
+        ConnectionBorrowTimeout: 120
